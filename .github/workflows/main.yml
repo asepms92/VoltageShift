@@ -27,9 +27,9 @@ jobs:
           src=$(/usr/bin/curl -Lfs https://raw.githubusercontent.com/acidanthera/ocbuild/master/ci-bootstrap.sh) && eval "$src" || exit 1
 
       - run: xcodebuild -scheme VoltageShift -derivedDataPath . -configuration Debug -arch x86_64
-      - run: xcodebuild -scheme voltageshift -derivedDataPath . -configuration Debug -arch x86_64
+      - run: xcodebuild -scheme voltageshiftd -derivedDataPath . -configuration Debug -arch x86_64
       - run: xcodebuild -scheme VoltageShift -derivedDataPath . -configuration Release -arch x86_64
-      - run: xcodebuild -scheme voltageshift -derivedDataPath . -configuration Release -arch x86_64
+      - run: xcodebuild -scheme voltageshiftd -derivedDataPath . -configuration Release -arch x86_64
 
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v4
@@ -38,7 +38,7 @@ jobs:
           path: Build/Products/*/*.zip
       - name: Upload to Release
         if: github.event_name == 'release'
-        uses: svenstaro/upload-release-action@e74ff71f7d8a4c4745b560a485cc5fdb9b5b999d
+        uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: Build/Products/*/*.zip

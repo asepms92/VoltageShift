@@ -27,7 +27,7 @@ xcodebuild  -target VoltageShift
 # Change owner
 sudo chown -R root:wheel build/Release/VoltageShift.kext
 # Build command line tool
-xcodebuild  -target voltageshift
+xcodebuild  -target voltageshiftd
 ```
 
 Usage
@@ -54,25 +54,25 @@ For Big Sur, a diaglog will showed when first launched, tick Grey button redirec
 
 You can view your current voltage offset,CPU freqency,power and temperture settings with the following command:
 
-    ./voltageshift info
+    ./voltageshiftd info
     
 You can continue to monitor the CPU frequency, power and temperture by using:
 
-    ./voltageshift mon
+    ./voltageshiftd mon
     
 Six types of voltage offsets are dispenible to change, however we only suggest undervolting the CPU and GPU only.
 
-    ./voltageshift offset <CPU> <GPU> <CPUCache> <SystemAgent> <Analogy I/O> <Digital I/O>
+    ./voltageshiftd offset <CPU> <GPU> <CPUCache> <SystemAgent> <Analogy I/O> <Digital I/O>
     
 for example reduced CPU -50mv and GPU -30mv
 
-    ./voltageshift offset -50 -30
+    ./voltageshiftd offset -50 -30
 
 If you set too low the system will freeze, please turn OFF completely and turn ON computer to reset back the undervolt to 0mV.
 
 After you test throughfuly the settings and are comfortable with System stability, you can apply the launchd: (require sudo root)
 
-    sudo ./voltageshift buildlaunchd <CPU> <GPU> <CPUCache> <SA> <AI/O> <DI/O> <turbo> <pl1> <pl2> <remain> <UpdateMins (0 only apply at bootup)>
+    sudo ./voltageshiftd buildlaunchd <CPU> <GPU> <CPUCache> <SA> <AI/O> <DI/O> <turbo> <pl1> <pl2> <remain> <UpdateMins (0 only apply at bootup)>
     
 If remain is set to 1, the kext will remain on system     
 
@@ -80,25 +80,25 @@ The <Update Mins> is the update interval of the tool to check and change, the De
 
 for example:
 
-    sudo ./voltageshift buildlaunchd  -50 -50 0 0 0 0 0 50 80 1 160
+    sudo ./voltageshiftd buildlaunchd  -50 -50 0 0 0 0 0 50 80 1 160
 
 set system auto apply CPU -50mv and GPU -50mv, close Turbo, and set PL1 to 50, PL2 to 80, run every boot and every 160min and kext remain on system .
 
-    sudo ./voltageshift buildlaunchd  0 0 0 0 0 0 0 -1
+    sudo ./voltageshiftd buildlaunchd  0 0 0 0 0 0 0 -1
 
 switch off turbo only, run every boot and every 160min .
 
-    sudo ./voltageshift buildlaunchd  -20 0 -20 0 0 0 0 -1 -1 -1 0
+    sudo ./voltageshiftd buildlaunchd  -20 0 -20 0 0 0 0 -1 -1 -1 0
 
 set system auto apply CPU -20mv and cache -20mv, run only boot .
 
 You can remove the launchd with the following command:
 
-     ./voltageshift removelaunchd
+     ./voltageshiftd removelaunchd
      
 For load the kext in current directory (remaining kext driver on system)
  
-    ./voltageshift loadkext
+    ./voltageshiftd loadkext
 
 or
 
@@ -107,7 +107,7 @@ or
     
 For unload the kext 
 
-    ./voltageshift unloadkext
+    ./voltageshiftd unloadkext
 
 or
     
@@ -160,35 +160,23 @@ Additional
    
    Manually change the launchd (com.sicreative.VoltageShift.plist under /Library/LaunchDaemons)
    by adding new ProgramArguments '--damage' between 
-   '/Library/Application Support/VoltageShift/voltageshift' and 'offsetdaemons'
+   '/Library/Application Support/VoltageShift/voltageshiftd' and 'offsetdaemons'
    
    
    
    
    To read the MSR 
    
-      ./voltageshift read <HEX_MSR>
+      ./voltageshiftd read <HEX_MSR>
       
    To set the MSR
    
-     ./voltageshift write <HEX_MSR> <HEX_VALUE>
+     ./voltageshiftd write <HEX_MSR> <HEX_VALUE>
      
 To set the Power Limted of PL1 (Long Term) and PL2 (Short Term)  
     
-    ./voltageshift power <PL1> <PL2>
+    ./voltageshiftd power <PL1> <PL2>
      
 To set Turbo Enabled (0-no turbo 1-turbo):
 
-    ./voltageshift turbo <0/1>
-
- 
-   
-
-
-    
-
-
-
-
-
-
+    ./voltageshiftd turbo <0/1>

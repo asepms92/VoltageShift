@@ -15,11 +15,15 @@
 
 #include "TargetConditionals.h"
 
-// SET TRUE WHEN YOUR SYSTEM REQUIRE OFFSET
+/* SET TRUE WHEN YOUR SYSTEM REQUIRE OFFSET */
 #define OFFSET_TEMP 0
-// #define DEBUG 1
+#define DEBUG 1
 
-#define kAnVMSRClassName "VoltageShiftAnVMSR"
+#ifndef MAP_FAILED
+#define MAP_FAILED ((void *) -1)
+#endif /* MAP_FAILED */
+
+#define kAnVMSRClassName "VoltageShift"
 
 #define MSR_OC_MAILBOX 0x150
 #define MSR_OC_MAILBOX_CMD_OFFSET 32
@@ -47,22 +51,25 @@ uint64 dtsmax = 0;
 uint64 tempoffset = 0;
 bool isUnloadOnEnd = false;
 
-enum
-{
+enum {
     AnVMSRActionMethodRDMSR = 0,
     AnVMSRActionMethodWRMSR = 1,
+    AnVMSRActionMethodPrepareMap = 2,
     AnVMSRNumMethods
 };
 
-typedef struct
-{
+typedef struct {
     UInt32 action;
     UInt32 msr;
     UInt64 param;
 } inout;
 
-io_service_t getService()
-{
+typedef struct {
+    UInt64 addr;
+    UInt64 size;
+} map_t;
+
+io_service_t getService() {
     io_service_t service = 0;
     mach_port_t masterPort;
     io_iterator_t iter;
@@ -93,31 +100,30 @@ failure:
     return service;
 }
 
-void usage(const char *name)
-{
+void usage(const char *name) {
     printf("------------------------------------------------------------------------\n");
-    printf("VoltageShift Undervoltage Tool v1.27 for Intel Broadwell/Haswell\n");
+    printf("VoltageShift Undervoltage Tool v1.30 for Intel Haswell/Broadwell\n");
     printf("Copyright (C) 2020 SC Lee\n");
     printf("------------------------------------------------------------------------\n");
     printf("Usage:\n");
-    printf("Set voltage:\n   %s offset <CPU> <GPU> <CPUCache> <SA> <AI/O> <DI/O>\n", name);
-    printf("Set boot and auto apply:\n   sudo %s buildlaunchd <CPU> <GPU> <CPUCache> <SA> <AI/O> <DI/O> <turbo> <pl1> <pl2> <remain> <UpdateMins (0 only apply at bootup)>\n", name);
-    printf("Remove boot and auto apply:\n   %s removelaunchd\n", name);
-    printf("Get info of current setting:\n   %s info\n", name);
-    printf("Continuous monitor of CPU:\n   %s mon\n", name);
-    printf("Set Power Limit: %s power <PL1> <PL2>\n", name);
-    printf("Set Turbo Enabled: %s turbo <0/1>\n", name);
-    printf("Read MSR: %s read <HEX_MSR>\n", name);
-    printf("Write MSR: %s write <HEX_MSR> <HEX_VALUE>\n", name);
+    printf("Set voltage:\n   %s offset <CPU> <GPU> <CPUCache> <SA> <AI/O> <DI/O>\n\n", name);
+    printf("Set boot and auto apply:\n   sudo %s buildlaunchd <CPU> <GPU> <CPUCache> <SA> <AI/O> <DI/O> <turbo> <pl1> <pl2> <remain> <UpdateMins (0 only apply at bootup)>\n\n", name);
+    printf("Remove boot and auto apply:\n   %s removelaunchd\n\n", name);
+    printf("Get info of current setting:\n   %s info\n\n", name);
+    printf("Continuous monitor of CPU:\n   %s mon\n\n", name);
+    printf("Set Power Limit: %s power <PL1> <PL2>\n\n", name);
+    printf("Set Turbo Disabled/Enabled: %s turbo <0/1>\n\n", name);
+    printf("Read MSR: %s read <HEX_MSR>\n\n", name);
+    printf("Write MSR: %s write <HEX_MSR> <HEX_VALUE>\n\n", name);
+    printf("Read memory: %s rdmem <HEX_ADDR>\n\n", name);
+    printf("Write memory: %s wrmem <HEX_ADDR> <HEX_VALUE>\n\n", name);
 }
 
-unsigned long long hex2int(const char *s)
-{
+unsigned long long hex2int(const char *s) {
     return strtoull(s, NULL, 16);
 }
 
-void printBits(size_t const size, void const *const ptr)
-{
+void printBits(size_t const size, void const *const ptr) {
     unsigned char *b = (unsigned char *) ptr;
     unsigned char byte;
     unsigned long int i, j;
@@ -136,22 +142,21 @@ void printBits(size_t const size, void const *const ptr)
     }
 }
 
-//
-//  Read OC Mailbox
-//  Ref of Intel Turbo Boost Max Technology 3.0 legacy (non HWP) enumeration driver
-//  https://github.com/torvalds/linux/blob/master/drivers/platform/x86/intel_turbo_max_3.c
-//
-//  offset 0x40 is the OC Mailbox Domain bit relative for:
-//
-//  domain : 0 - CPU
-//           1 - GPU
-//           2 - CPU Cache
-//           3 - System Agency
-//           4 - Analogy I/O
-//           5 - Digital I/O
-//
-int writeOCMailBox(int domain, int offset)
-{
+/*
+ * Read OC Mailbox
+ * Ref of Intel Turbo Boost Max Technology 3.0 legacy (non HWP) enumeration driver :
+ * https://github.com/torvalds/linux/blob/master/drivers/platform/x86/intel_turbo_max_3.c
+ *
+ * offset 0x40 is the OC Mailbox Domain bit relative for:
+ *    domain : 0 - CPU
+ *             1 - GPU
+ *             2 - CPU Cache
+ *             3 - System Agency
+ *             4 - Analogy I/O
+ *             5 - Digital I/O
+*/
+
+int writeOCMailBox(int domain, int offset) {
     if (offset > 0 && !damagemode) {
         printf("------------------------------------------------------------------------\n");
         printf("VoltageShift offset Tool\n");
@@ -159,7 +164,7 @@ int writeOCMailBox(int domain, int offset)
         printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         printf("Your settings require overclocking. This May Damage you Computer !!!!\n");
         printf("use --damaged for override\n");
-        printf("usage: voltageshift --damage offset ... for run\n");
+        printf("usage: voltageshiftd --damage offset ... for run\n");
         printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         printf("------------------------------------------------------------------------\n");
 
@@ -173,7 +178,7 @@ int writeOCMailBox(int domain, int offset)
         printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         printf("Your settings are too low. Are you sure you want those values\n");
         printf("use --damaged for override\n");
-        printf("usage: voltageshift --damage offset ... for run\n");
+        printf("usage: voltageshiftd --damage offset ... for run\n");
         printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         printf("------------------------------------------------------------------------\n");
 
@@ -197,7 +202,7 @@ int writeOCMailBox(int domain, int offset)
     }
 
     uint64 value = offsetvalue << OC_MAILBOX_VALUE_OFFSET;
-    // MSR 0x150 OC Mailbox 0x11 for write of voltage offset values
+    /* MSR 0x150 OC Mailbox 0x11 for write of voltage offset values */
     uint64 cmd = OC_MAILBOX_WHITE_VOLTAGE_CMD;
     int ret;
 
@@ -206,7 +211,7 @@ int writeOCMailBox(int domain, int offset)
     size_t outsize = sizeof(out);
     /* Issue favored core read command */
     value |= cmd << MSR_OC_MAILBOX_CMD_OFFSET;
-     /* Domain for the values set for */
+    /* Domain for the values set for */
     value |= ((uint64)domain) << MSR_OC_MAILBOX_DOMAIN_OFFSET;
     /* Set the busy bit to indicate OS is trying to issue command */
     value |= ((uint64)0x1) << MSR_OC_MAILBOX_BUSY_BIT;
@@ -223,9 +228,8 @@ int writeOCMailBox(int domain, int offset)
     return 0;
 }
 
-int readOCMailBox(int domain)
-{
-    // MSR 0x150 OC Mailbox 0x10 for read of voltage offset values
+int readOCMailBox(int domain) {
+    /* MSR 0x150 OC Mailbox 0x10 for read of voltage offset values */
     uint64 value, cmd = OC_MAILBOX_READ_VOLTAGE_CMD;
     int ret, i;
 
@@ -278,8 +282,7 @@ int readOCMailBox(int domain)
     return returnvalue / 2;
 }
 
-int showcpuinfo()
-{
+int showcpuinfo() {
     kern_return_t ret;
 
     inout in;
@@ -472,8 +475,7 @@ int showcpuinfo()
     return (0);
 }
 
-int setPower(int argc, int p1, int p2)
-{
+int setPower(int argc, int p1, int p2) {
     inout in;
     inout out;
     size_t outsize = sizeof(out);
@@ -531,8 +533,7 @@ int setPower(int argc, int p1, int p2)
     return 1;
 }
 
-int setPower(int argc, const char *argv[])
-{
+int setPower(int argc, const char *argv[]) {
     int p1 = 0;
     int p2 = 0;
 
@@ -549,8 +550,7 @@ int setPower(int argc, const char *argv[])
     return setPower(argc, p1, p2);
 }
 
-int setTurbo(int argc, bool enable)
-{
+int setTurbo(int argc, bool enable) {
     inout in;
     inout out;
     size_t outsize = sizeof(out);
@@ -581,7 +581,8 @@ int setTurbo(int argc, bool enable)
     else
         turbodisabled = 0;
 
-    out.param ^= (-(turbodisabled ? 1 : 0 >> 38 & 0x1) ^ out.param) & (1UL << 38);
+    out.param ^= (-(turbodisabled ? 1 : 0 >> (38 & 0x1)) ^ out.param) & (1UL << 38);
+    // out.param = turbodisabled ? 0x4000850089 : 0x850089;
 
     in.action = AnVMSRActionMethodWRMSR;
     in.param = out.param;
@@ -596,8 +597,7 @@ int setTurbo(int argc, bool enable)
     return 1;
 }
 
-int setTurbo(int argc, const char *argv[])
-{
+int setTurbo(int argc, const char *argv[]) {
     bool enable = true;
 
     if (argc <= 2) {
@@ -615,12 +615,11 @@ int setTurbo(int argc, const char *argv[])
     return setTurbo(argc, enable);
 }
 
-int setoffsetdaemons(int argc, const char *argv[])
-{
+int setoffsetdaemons(int argc, const char *argv[]) {
     int p1 = 0;
 
     for (int i = 0; i < argc - 2; i++) {
-        // Set turbo
+        /* Set turbo */
         if (i == 6) {
             int value = (int)strtol((char *)argv[i + 2], NULL, 10);
             if (value >= 0)
@@ -654,8 +653,7 @@ int setoffsetdaemons(int argc, const char *argv[])
     return (0);
 }
 
-int setoffset(int argc, const char *argv[])
-{
+int setoffset(int argc, const char *argv[]) {
     long cpu_offset = 0;
     long gpu_offset = 0;
     long cpuccache_offset = 0;
@@ -732,8 +730,7 @@ int setoffset(int argc, const char *argv[])
     return (0);
 }
 
-void unloadkext()
-{
+void unloadkext() {
     if (!isUnloadOnEnd)
         return;
 
@@ -752,8 +749,7 @@ void unloadkext()
     system(output.str().c_str());
 }
 
-void loadkext()
-{
+void loadkext() {
     isUnloadOnEnd = true;
 
     std::stringstream output;
@@ -768,15 +764,15 @@ void loadkext()
     system(output.str().c_str());
 }
 
-void removeLaunchDaemons()
-{
+void removeLaunchDaemons() {
     std::stringstream output;
+    output.str("sudo launchctl unload /Library/LaunchDaemons/com.sicreative.VoltageShift.plist");
+    system(output.str().c_str());
     output.str("sudo rm -rf /Library/LaunchDaemons/com.sicreative.VoltageShift.plist");
     system(output.str().c_str());
     output.str("sudo rm -rf /Library/Application\\ Support/VoltageShift");
     system(output.str().c_str());
-
-    // Check process of build sucessful
+    /* Check process of build sucessful */
     int error = 0;
 
     FILE *fp = popen("sudo ls /Library/LaunchDaemons/com.sicreative.VoltageShift.plist", "r");
@@ -800,13 +796,13 @@ void removeLaunchDaemons()
                 error++;
                 continue;
             }
-            if (strstr(str, "voltageshift") != NULL) {
+            if (strstr(str, "voltageshiftd") != NULL) {
                 error++;
             }
         }
         pclose(fp);
     }
-    // Error Messages
+    /* Error Messages */
     if (error != 0) {
         printf("\n\n\n\n\n");
         printf("------------------------------------------------------------------------\n");
@@ -814,6 +810,7 @@ void removeLaunchDaemons()
         printf("------------------------------------------------------------------------\n");
         printf("Can't Remove the launchd. No Sucessful of delete the files,\n");
         printf("or manual delete by:\n");
+        printf("sudo launchctl unload /Library/LaunchDaemons/com.sicreative.VoltageShift.plist\n");
         printf("sudo rm -rf /Library/LaunchDaemons/com.sicreative.VoltageShift.plist\n");
         printf("sudo rm -rf /Library/Application\\ Support/VoltageShift\n");
         printf("------------------------------------------------------------------------\n");
@@ -834,8 +831,7 @@ void removeLaunchDaemons()
     printf("------------------------------------------------------------------------\n");
 }
 
-void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
-{
+void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160) {
     std::stringstream output;
 
     if (min > 720) {
@@ -848,15 +844,16 @@ void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
 
     printf("Build for LaunchDaemons of Auto Apply for VoltageShift\n");
     printf("------------------------------------------------------------------------\n");
-    output.str("sudo rm -rf /Library/Application\\ Support/VoltageShift");
+    output.str("sudo launchctl unload /Library/LaunchDaemons/com.sicreative.VoltageShift.plist");
     output.str("sudo rm -rf /Library/LaunchDaemons/com.sicreative.VoltageShift.plist");
+    output.str("sudo rm -rf /Library/Application\\ Support/VoltageShift");
     system(output.str().c_str());
     output.str("");
-    // add 0 for no user input field
+    /* add 0 for no user input field */
     for (int i = (int)values.size(); i <= 5; i++) {
         values.push_back(0);
     }
-    // Build .plist
+    /* Build LaunchDaemons */
     output << "sudo echo \""
     << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
     << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">"
@@ -867,7 +864,7 @@ void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
     << "<string>com.sicreative.VoltageShift</string>"
     << "<key>ProgramArguments</key>"
     << "<array>"
-    << "<string>/Library/Application Support/VoltageShift/voltageshift</string>"
+    << "<string>/Library/Application Support/VoltageShift/voltageshiftd</string>"
     << "<string>offsetdaemons</string>";
 
     for (int i = 0; i < values.size(); i++) {
@@ -910,26 +907,25 @@ void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
     << "</plist>"
     << "\" > /Library/LaunchDaemons/com.sicreative.VoltageShift.plist"
     << " ";
-    // Write permissions and copy
+    /* Set permissions and copy */
     system(output.str().c_str());
     output.str("sudo chmod 644 /Library/LaunchDaemons/com.sicreative.VoltageShift.plist");
     system(output.str().c_str());
     output.str("sudo chown root:wheel /Library/LaunchDaemons/com.sicreative.VoltageShift.plist");
     system(output.str().c_str());
-    output.str("sudo mkdir /Library/Application\\ Support/VoltageShift");
+    output.str("sudo mkdir -p /Library/Application\\ Support/VoltageShift");
     system(output.str().c_str());
     output.str("sudo cp -R ./VoltageShift.kext /Library/Application\\ Support/VoltageShift/");
     system(output.str().c_str());
-    output.str("sudo cp ./voltageshift /Library/Application\\ Support/VoltageShift/");
+    output.str("sudo cp ./voltageshiftd /Library/Application\\ Support/VoltageShift/");
     system(output.str().c_str());
     output.str("sudo chown -R root:wheel /Library/Application\\ Support/VoltageShift/VoltageShift.kext");
     system(output.str().c_str());
-    output.str("sudo chmod 755 /Library/Application\\ Support/VoltageShift/voltageshift");
+    output.str("sudo chmod 755 /Library/Application\\ Support/VoltageShift/voltageshiftd");
     system(output.str().c_str());
-    output.str("sudo chown root:wheel /Library/Application\\ Support/VoltageShift/voltageshift");
+    output.str("sudo chown root:wheel /Library/Application\\ Support/VoltageShift/voltageshiftd");
     system(output.str().c_str());
-
-    // Check process of build sucessful
+    /* Check process of build sucessful */
     int error = 3;
 
     FILE *fp = popen("sudo ls /Library/LaunchDaemons/com.sicreative.VoltageShift.plist", "r");
@@ -954,26 +950,26 @@ void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
                 error--;
                 continue;
             }
-            if (strstr(str, "voltageshift") != NULL) {
+            if (strstr(str, "voltageshiftd") != NULL) {
                 error--;
             }
         }
         pclose(fp);
     }
-    // Error Messages
+    /* Error Messages */
     if (error != 0) {
         printf("\n\n\n\n\n");
         printf("------------------------------------------------------------------------\n");
         printf("VoltageShift builddaemons Tool\n");
         printf("------------------------------------------------------------------------\n");
         printf("Can't build the launchd. Can´t create the files, please use:\n");
-        printf("sudo ./voltageshift buildlaunchd ....\n");
+        printf("sudo ./voltageshiftd buildlaunchd ....\n");
         printf("for Root privilege.\n");
         printf("------------------------------------------------------------------------\n");
 
         return;
     }
-    // Sucess and Caution Messages
+    /* Sucess and Caution Messages */
     printf("\n\n\n\n\n");
     printf("------------------------------------------------------------------------\n");
     printf("VoltageShift builddaemons Tool\n");
@@ -984,8 +980,9 @@ void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
     printf("------------------------------------------------------------------------\n");
     printf("************************************************************************\n");
     printf("Please CONFIRM and TEST the system STABILITY in the below settings,\n otherwise REMOVE this launchd IMMEDIATELY\n");
-    printf("You can remove this by using: ./voltageshift removelaunchd\n");
+    printf("You can remove this by using: ./voltageshiftd removelaunchd\n");
     printf("Or manual remove by:\n");
+    printf("sudo launchctl unload /Library/LaunchDaemons/com.sicreative.VoltageShift.plist\n");
     printf("sudo rm -rf /Library/LaunchDaemons/com.sicreative.VoltageShift.plist\n");
     printf("sudo rm -rf /Library/Application\\ Support/VoltageShift\n");
     printf("------------------------------------------------------------------------\n");
@@ -1002,7 +999,7 @@ void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
         printf("Power   %d  %d  \n", values[7], values[8]);
     if (values.size() >= 10 && values[9] >= 0)
         printf("The kext will %sremain on System when unload\n", values[9] > 0 ? "" : "not");
-    // End Messages
+    /* End Messages */
     printf("------------------------------------------------------------------------\n");
     printf("************************************************************************\n");
     printf("Please notice if you cannot boot the system after installing, you need to:\n");
@@ -1014,8 +1011,116 @@ void writeLaunchDaemons(std::vector<int> values = {0}, int min = 160)
     printf("------------------------------------------------------------------------\n");
 }
 
-void intHandler(int sig)
-{
+void *map_physical(uint64_t phys_addr, size_t len) {
+    kern_return_t err;
+
+#if __LP64__
+    mach_vm_address_t addr;
+    mach_vm_size_t size;
+#else
+    vm_address_t addr;
+    vm_size_t size;
+#endif /* __LP64__ */
+
+    size_t dataInLen = sizeof(map_t);
+    size_t dataOutLen = sizeof(map_t);
+    map_t in, out;
+
+    in.addr = phys_addr;
+    in.size = len;
+
+#ifdef DEBUG
+    printf("map_phys: phys %08llx, %08zx\n", phys_addr, len);
+#endif /* DEBUG */
+
+#if !defined(__LP64__) && defined(WANT_OLD_API)
+    /* Check if OSX 10.5 API is available */
+    if (IOConnectCallStructMethod != NULL) {
+#endif /* !defined(__LP64__) && defined(WANT_OLD_API) */
+
+        err = IOConnectCallStructMethod(connect, AnVMSRActionMethodPrepareMap, &in, dataInLen, &out, &dataOutLen);
+
+#if !defined(__LP64__) && defined(WANT_OLD_API)
+    }
+    else {
+        /* Use old API */
+        err = IOConnectMethodStructureIStructureO(connect, kPrepareMap, dataInLen, &dataOutLen, &in, &out);
+    }
+#endif /* !defined(__LP64__) && defined(WANT_OLD_API) */
+
+    if (err != KERN_SUCCESS) {
+        printf("\nError(kPrepareMap): system 0x%x subsystem 0x%x code 0x%x ", err_get_system(err), err_get_sub(err), err_get_code(err));
+
+        printf("physical 0x%08llx[0x%x]\n", phys_addr, (unsigned int)len);
+
+        switch (err_get_code(err)) {
+            case 0x2c2: printf("Invalid argument.\n"); errno = EINVAL; break;
+            case 0x2cd: printf("Device not open.\n"); errno = ENOENT; break;
+        }
+
+        return MAP_FAILED;
+    }
+
+    err = IOConnectMapMemory(connect, 0, mach_task_self(), &addr, &size, kIOMapAnywhere | kIOMapInhibitCache);
+    /* Now this is odd; The above connect seems to be unfinished at the
+     * time the function returns. So wait a little bit, or the calling
+     * program will just segfault. Bummer. Who knows a better solution?
+     */
+    usleep(1000);
+
+    if (err != KERN_SUCCESS) {
+        printf("\nError(IOConnectMapMemory): system 0x%x subsystem 0x%x code 0x%x ", err_get_system(err), err_get_sub(err), err_get_code(err));
+
+        printf("physical 0x%08llx[0x%x]\n", phys_addr, (unsigned int)len);
+
+        switch (err_get_code(err)) {
+            case 0x2c2: printf("Invalid argument.\n"); errno = EINVAL; break;
+            case 0x2cd: printf("Device not open.\n"); errno = ENOENT; break;
+        }
+
+        return MAP_FAILED;
+    }
+
+#ifdef DEBUG
+    printf("map_phys: virt %08llx, %08llx\n", addr, size);
+#endif /* DEBUG */
+
+    return (void *)addr;
+}
+
+void unmap_physical(void *virt_addr __attribute__((unused)), size_t len __attribute__((unused))) {
+    /* Nut'n Honey */
+}
+
+int access_direct_memory(uintptr_t addr, uint32_t *value, bool write) {
+    /* align to a page boundary */
+    const uintptr_t page_mask = 0xFFF;
+    const size_t len = 4;
+    const uintptr_t page_offset = addr & page_mask;
+    const uintptr_t map_addr = addr & ~page_mask;
+    const size_t map_len = (len + page_offset + page_mask) & ~page_mask;
+
+    volatile uint8_t * const map_buf = (uint8_t *) map_physical(map_addr, map_len);
+    if (map_buf == NULL) {
+        printf("Map memory %08lx failed.", addr);
+        return -1;
+    }
+    volatile uint8_t * const buf = map_buf + page_offset;
+
+    if (!write) {
+        *value = buf[0] | buf[1] << 8 | buf[2] << 16 | buf[3] << 24;
+    }
+    else {
+        buf[0] = (uint8_t) ((*value) & 0xFF);
+        buf[1] = (uint8_t) (((*value) >> 8) & 0xFF);
+        buf[2] = (uint8_t) (((*value) >> 16) & 0xFF);
+        buf[3] = (uint8_t) (((*value) >> 24) & 0xFF);
+    }
+
+    return 0;
+}
+
+void intHandler(int sig) {
     char c;
     signal(sig, SIG_IGN);
     printf("\n quit? [y/n] ");
@@ -1026,12 +1131,11 @@ void intHandler(int sig)
     }
     else
         signal(SIGINT, intHandler);
-    // Get new line character
+    /* Get new line character */
     getchar();
 }
 
-int main(int argc, const char *argv[])
-{
+int main(int argc, const char *argv[]) {
 #if TARGET_CPU_ARM64
     printf("\n\n\n\n\n");
     printf("------------------------------------------------------------------------\n");
@@ -1062,7 +1166,7 @@ int main(int argc, const char *argv[])
             loadkext();
 
         count++;
-        // Try load 10 times, otherwise error return
+        /* Try load 10 times, otherwise error return */
         if (count > 10)
             return (1);
     }
@@ -1102,12 +1206,14 @@ int main(int argc, const char *argv[])
         printf("System Agency offset: %dmv\n", readOCMailBox(3));
         printf("Analogy I/O: %dmv\n", readOCMailBox(4));
         printf("Digital I/O: %dmv\n\n", readOCMailBox(5));
-        //   domain : 0 - CPU
-        //            1 - GPU
-        //            2 - CPU Cache
-        //            3 - System Agency
-        //            4 - Analogy I/O
-        //            5 - Digital I/O
+        /*
+         *   domain : 0 - CPU
+         *            1 - GPU
+         *            2 - CPU Cache
+         *            3 - System Agency
+         *            4 - Analogy I/O
+         *            5 - Digital I/O
+         */
         do {
             if (showcpuinfo() > 0) {
                 fflush(stdout);
@@ -1213,7 +1319,7 @@ int main(int argc, const char *argv[])
             arg.push_back((int)strtol((char *)argv[10], NULL, 10));
         if (argc >= 12)
             arg.push_back((int)strtol((char *)argv[11], NULL ,10));
-        // Write LaunchDaemons
+        /* Write LaunchDaemons */
         if (argc >= 13)
             writeLaunchDaemons(arg, (int)strtol((char *)argv[12], NULL, 10));
         else {
@@ -1270,6 +1376,35 @@ int main(int argc, const char *argv[])
         ret = IOConnectCallStructMethod(connect, AnVMSRActionMethodWRMSR, &in, sizeof(in), &out, &outsize);
         if (ret != KERN_SUCCESS) {
             printf("Can't connect to StructMethod to send commands\n");
+        }
+    }
+    else if (!strncmp(parameter, "rdmem", 5)) {
+        UInt32 addr = (UInt32)hex2int(msr);
+        uint32_t value = 0;
+        if (access_direct_memory(addr, &value, false) != 0) {
+            printf("read direct memory %x failed", addr);
+        }
+        else {
+            printf("RDMEM %x returns value 0x%x\n", addr, value);
+        }
+    }
+    else if (!strncmp(parameter, "wrmem", 5)) {
+        if (argc < 4) {
+            usage(argv[0]);
+            return (1);
+        }
+
+        regvalue = (char *)argv[3];
+
+        UInt32 addr = (UInt32)hex2int(msr);
+        uint32_t value = (uint32_t)hex2int(regvalue);
+
+        if (access_direct_memory(addr, &value, true) != 0) {
+            printf("write direct memory %x with %x failed", addr, value);
+        }
+        else {
+            access_direct_memory(addr, &value, false);
+            printf("WRMEM %x returns value 0x%x\n", addr, value);
         }
     }
     else {

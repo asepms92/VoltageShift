@@ -1,5 +1,5 @@
 //
-//  VoltageShiftAnVMSR.h
+//  VoltageShift.h
 //
 //  Created by SC Lee on 12/09/13.
 //  Copyright (c) 2017 SC Lee . All rights reserved.
@@ -9,6 +9,9 @@
 //  This is licensed under the GNU General Public License v3.0
 //
 
+#ifndef VoltageShift_hpp
+#define VoltageShift_hpp
+
 #include <mach/mach_types.h>
 #include <mach/machine.h>
 #include <pexpert/pexpert.h>
@@ -17,37 +20,43 @@
 #include <IOKit/IOService.h>
 #include <IOKit/IOUserClient.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
+#include <IOKit/IOMemoryDescriptor.h>
 #include <libkern/libkern.h>
 
 #if TARGET_CPU_X86_64
 #include <i386/proc_reg.h>
 #endif /* TARGET_CPU_X86_64 */
 
-#define BUFSIZE 512 // bytes
+#define BUFSIZE 512 /* bytes */
 #define MAXENTRIES 500
 #define MAXUSERS 5
 
+#define DEBUG 1
+
 #define kMethodObjectUserClient ((IOService *) 0)
 
-enum
-{
+enum {
     AnVMSRActionMethodRDMSR = 0,
     AnVMSRActionMethodWRMSR = 1,
+    AnVMSRActionMethodPrepareMap = 2,
     AnVMSRNumMethods
 };
 
-typedef struct
-{
+typedef struct {
     UInt32 action;
     UInt32 msr;
     UInt64 param;
 } inout;
 
+typedef struct {
+    UInt64 addr;
+    UInt64 size;
+} map_t;
+
 class AnVMSRUserClient;
 
-class VoltageShiftAnVMSR : public IOService
-{
-    OSDeclareDefaultStructors(VoltageShiftAnVMSR)
+class VoltageShift : public IOService {
+    OSDeclareDefaultStructors(VoltageShift)
 
 public:
     virtual bool init(OSDictionary *dictionary = 0) override;
@@ -68,12 +77,11 @@ public:
     AnVMSRUserClient *mClientPtr[MAXUSERS + 1];
 };
 
-class AnVMSRUserClient : public IOUserClient
-{
+class AnVMSRUserClient : public IOUserClient {
     OSDeclareDefaultStructors(AnVMSRUserClient);
 
 private:
-    VoltageShiftAnVMSR *mDevice;
+    VoltageShift *mDevice;
 
 public:
     void messageHandler(UInt32 type, const char *format, ...) __attribute__((format (printf, 3, 4)));
@@ -94,8 +102,12 @@ public:
     virtual IOReturn clientMemoryForType(UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory) override;
     virtual IOReturn actionMethodRDMSR(UInt32 *dataIn, UInt32 *dataOut, IOByteCount inputSize, IOByteCount *outputSize);
     virtual IOReturn actionMethodWRMSR(UInt32 *dataIn, UInt32 *dataOut, IOByteCount inputSize, IOByteCount *outputSize);
+    virtual IOReturn actionMethodPrepareMap(UInt32 *dataIn, UInt32 *dataOut, IOByteCount inputSize, IOByteCount *outputSize);
 
     task_t fTask;
-    // Remove IODataQueue because of security issue recommend by Apple
+    /* Remove IODataQueue because of security issue recommend by Apple */
     int Q_Err;
+    UInt64 LastMapAddr, LastMapSize;
 };
+
+#endif /* VoltageShift_hpp */
